@@ -1,0 +1,25 @@
+<package>
+  <description brief="ros_canopen">
+
+     ros_canopen
+
+  </description>
+  <author>tys</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/ros_canopen</url>
+  <depend package="std_msgs"/>
+  <depend package="rospy"/>
+  <depend package="roscpp"/>
+  <depend package="cob_srvs"/>
+  <rosdep name="lboost_system"/>  
+  <rosdep name="lboost_filesystem"/>  
+  <rosdep name="lpcan"/>  
+  <rosdep name="lpthread"/>
+  <rosdep name="lcanopen"/>
+  <rosdep name="lpcan"/>  
+
+
+</package>
+
+
