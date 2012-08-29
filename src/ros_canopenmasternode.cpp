@@ -7,6 +7,7 @@
 #include <boost/bind.hpp>
 #include <boost/filesystem.hpp>
 #include <canopenmaster.h>
+#include <XmlRpcValue.h>
 
 typedef boost::function<bool(cob_srvs::Trigger::Request&, cob_srvs::Trigger::Response&)> TriggerCallbackType;
 typedef boost::function<void(const ros_canopen::posmsg&)> setPosCallbackType;
@@ -40,20 +41,44 @@ void setPosChainCallback(const ros_canopen::posmsg &msg, std::string chainName) 
   canopen::setPosCallback(chainName, positions);
 }
 
+std::vector<canopen::ChainDescription> parseChainDescription(XmlRpc::XmlRpcValue xx) {
+  std::vector<canopen::ChainDescription> chainDesc;
+
+  for (int i=0; i<xx.size(); i++) {
+    canopen::ChainDescription chain;
+    chain.name = static_cast<std::string>(xx[i]["name"]);
+    auto yy = xx[i]["devices"];
+    for (int j=0; j<yy.size(); j++) {
+      canopen::DeviceDescription device;
+      device.name = static_cast<std::string>(yy[j]["name"]);
+      device.id = static_cast<int>(yy[j]["id"]);
+      device.bus = static_cast<std::string>(yy[j]["bus"]);
+      chain.devices.push_back(device);
+    }
+    chainDesc.push_back(chain);
+  }
+  return chainDesc;
+}
+
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "ros_canopenmasternode");
   ros::NodeHandle n;
   canopen::using_master_thread = true;
 
+  XmlRpc::XmlRpcValue xmlrpc_array;
+  bool success = n.getParam("/chaindesc", xmlrpc_array);
+  auto chainDesc = parseChainDescription(xmlrpc_array);
+  canopen::initChainMap(chainDesc);
+
   // read in chain description file given as command line argument, e.g.
   // /home/tys/git/other/canopen/demo/single_device.csv
   // /home/tys/git/other/canopen/demo/multiple_devices.csv
-  if (argc!=2 || !exists(  boost::filesystem::path(argv[1]) )) {
+  /*  if (argc!=2 || !exists(  boost::filesystem::path(argv[1]) )) {
     std::cout << "File not found. Please provide a description file as command line argument" << std::endl;
     return -1;
-  }
-  canopen::initChainMap(argv[1]);
+    }*/
+  // canopen::initChainMap(argv[1]);  todo!
 
   // set up services, subsribers, and publishers for each of the chains:
   std::vector<TriggerCallbackType> initCallbacks;

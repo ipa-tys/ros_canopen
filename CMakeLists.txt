@@ -32,4 +32,4 @@ list( APPEND CMAKE_CXX_FLAGS "-std=c++0x ${CMAKE_CXX_FLAGS} -g -ftest-coverage -
 rosbuild_add_executable(dummycontrollernode_single_device src/dummycontrollernode_single_device.cpp)
 rosbuild_add_executable(dummycontrollernode_multiple_devices src/dummycontrollernode_multiple_devices.cpp)
 rosbuild_add_executable(ros_canopenmasternode src/ros_canopenmasternode.cpp)
-target_link_libraries(ros_canopenmasternode boost_system boost_filesystem pthread canopen pcan)
+target_link_libraries(ros_canopenmasternode boost_system boost_filesystem pthread canopen pcan yaml-cpp)

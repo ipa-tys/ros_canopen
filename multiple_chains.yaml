@@ -1,0 +1,31 @@
+- name: arm1
+  devices:
+    - name: joint1
+      id: 3
+      bus: /dev/pcan32
+    - name: joint2
+      id: 4
+      bus: /dev/pcan32
+    - name: joint3
+      id: 5
+      bus: /dev/pcan32
+    - name: joint4
+      id: 6
+      bus: /dev/pcan32
+    - name: joint5
+      id: 7
+      bus: /dev/pcan32
+    - name: joint6
+      id: 8
+      bus: /dev/pcan32
+- name: base1
+  devices:
+    - name: joint1
+      id: 8
+      bus: /dev/pcanusb0
+    - name: joint2
+      id: 9
+      bus: /dev/pcanusb0
+    - name: joint3
+      id: 10
+      bus: /dev/pcanusb0
