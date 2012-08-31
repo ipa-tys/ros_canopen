@@ -1,7 +1,10 @@
 #include "ros/ros.h"
 #include "std_msgs/String.h"
 #include "sensor_msgs/JointState.h"
+#include "pr2_controllers_msgs/JointTrajectoryControllerState.h"
+#include "brics_actuator/JointVelocities.h"
 #include "cob_srvs/Trigger.h"
+#include "cob_srvs/SetOperationMode.h"
 #include "ros_canopen/posmsg.h"
 #include <iostream>
 #include <map>
@@ -11,7 +14,10 @@
 #include <XmlRpcValue.h>
 
 typedef boost::function<bool(cob_srvs::Trigger::Request&, cob_srvs::Trigger::Response&)> TriggerCallbackType;
+typedef boost::function<bool(cob_srvs::SetOperationMode::Request&, cob_srvs::SetOperationMode::Response&)> SetOperationModeCallbackType;
+
 typedef boost::function<void(const ros_canopen::posmsg&)> setPosCallbackType;
+typedef boost::function<void(const brics_actuator::JointVelocities&)> JointVelocitiesCallbackType;
 
 bool initChainCallback(cob_srvs::Trigger::Request &req,
 		       cob_srvs::Trigger::Response &res, std::string chainName) {
@@ -29,6 +35,14 @@ bool homingChainCallback(cob_srvs::Trigger::Request &req,
   return true;
 }
 
+bool setOperationModeCallback(cob_srvs::SetOperationMode::Request &req,
+			      cob_srvs::SetOperationMode::Response &res, std::string chainName) {
+  res.success.data = true;  // for now this service is just a dummy, not used elsewhere
+  // res.error_message.data = "";
+  return true;
+}
+
+
 bool IPmodeChainCallback(cob_srvs::Trigger::Request &req,
 			  cob_srvs::Trigger::Response &res, std::string chainName) {
   canopen::IPmodeCallback(chainName);
@@ -41,6 +55,13 @@ void setPosChainCallback(const ros_canopen::posmsg &msg, std::string chainName) 
   std::vector<int> positions = msg.positions;
   canopen::setPosCallback(chainName, positions);
 }
+
+void jointVelocitiesCallback(const brics_actuator::JointVelocities &msg, std::string chainName) {
+  // std::vector<int> positions = msg.positions;  todo!
+  std::vector<int> velocities = {0,0,0,0,0,0};
+  canopen::jointVelocitiesCallback(chainName, velocities);
+}
+
 
 std::vector<canopen::ChainDescription> parseChainDescription(XmlRpc::XmlRpcValue xx) {
   std::vector<canopen::ChainDescription> chainDesc;
@@ -88,9 +109,19 @@ int main(int argc, char **argv)
   std::vector<ros::ServiceServer> homingServices;
   std::vector<TriggerCallbackType> IPmodeCallbacks;
   std::vector<ros::ServiceServer> IPmodeServices;
+  std::vector<SetOperationModeCallbackType> setOperationModeCallbacks;
+  std::vector<ros::ServiceServer> setOperationModeServices;
+
   std::vector<setPosCallbackType> setPosCallbacks;
   std::vector<ros::Subscriber> setPosSubscribers;
+
+  std::vector<JointVelocitiesCallbackType> jointVelocitiesCallbacks;
+  std::vector<ros::Subscriber> jointVelocitiesSubscribers;
+
+  std::map<std::string, ros::Publisher> currentOperationModePublishers;
   std::map<std::string, ros::Publisher> getCurrentPosPublishers;
+  std::map<std::string, ros::Publisher> statePublishers;
+  ros::Publisher jointStatesPublisher = n.advertise<sensor_msgs::JointState>("/joint_states", 100);
   for (auto it : canopen::chainMap) {
     initCallbacks.push_back( boost::bind(initChainCallback, _1, _2, it.first) );
     initServices.push_back( n.advertiseService(it.first + "/init", initCallbacks.back()) );
@@ -98,9 +129,20 @@ int main(int argc, char **argv)
     homingServices.push_back( n.advertiseService(it.first + "/homing", homingCallbacks.back()) );
     IPmodeCallbacks.push_back( boost::bind(IPmodeChainCallback, _1, _2, it.first) );
     IPmodeServices.push_back( n.advertiseService(it.first + "/IPmode", IPmodeCallbacks.back()) );
+    setOperationModeCallbacks.push_back( boost::bind(setOperationModeCallback, _1, _2, it.first) );
+    setOperationModeServices.push_back( n.advertiseService(it.first + "/set_operation_mode", setOperationModeCallbacks.back()) );
+
+
     setPosCallbacks.push_back( boost::bind(setPosChainCallback, _1, it.first) );
     setPosSubscribers.push_back( n.subscribe<ros_canopen::posmsg>(it.first + "/setpos", 100, setPosCallbacks.back()) );
+
+    jointVelocitiesCallbacks.push_back( boost::bind(jointVelocitiesCallback, _1, it.first) );
+    jointVelocitiesSubscribers.push_back( n.subscribe<brics_actuator::JointVelocities>(it.first + "/command_vel", 100, jointVelocitiesCallbacks.back()) );
+
+    currentOperationModePublishers[it.first] = n.advertise<std_msgs::String>(it.first + "/current_operationmode", 1000);
     getCurrentPosPublishers[it.first] = n.advertise<ros_canopen::posmsg>(it.first + "/getcurrentpos", 1000);
+    statePublishers[it.first] = n.advertise<pr2_controllers_msgs::JointTrajectoryControllerState>(it.first + "/state", 1000);
+
   }
 
   // initialize CAN device driver:
@@ -117,13 +159,33 @@ int main(int argc, char **argv)
 
   ros_canopen::posmsg msg;
   ros::Rate loop_rate(50);
-  // publish on the advertised topics; separate topics for each chain (so far, only getcurrentpos):
+  // publish on the advertised topics:
   while (ros::ok()) {
     
-    for (auto it : getCurrentPosPublishers) {
-      std::vector<int> currentPos = canopen::getCurrentPosCallback(it.first);
-      msg.positions = currentPos;
+    for (auto it : getCurrentPosPublishers) { // iterate over all chains, get current pos and vel and publish as topics:
+      std::vector<int> actualPos = canopen::getCurrentPosCallback(it.first);  // todo: double
+      std::vector<int> actualVel = {0,0,0,0,0,0}; // canopen::getCurrentVelCallback(it.first);  // todo: double
+      std::vector<double> desiredPos = {1.0,1.0,1.0,0.0,0.0,0.0};  // todo: double; todo: desiredpos
+      std::vector<double> desiredVel = {0,0,0,0.1,0.1,0.1}; // canopen::getCurrentVelCallback(it.first);  // todo: double
+      
+      msg.positions = actualPos;
       it.second.publish(msg);
+      
+      sensor_msgs::JointState js;  // this one not needed for controller (?); publishing only dummy info for now
+      std::vector<std::string> ss = {"arm1"};
+      js.name = ss;
+      jointStatesPublisher.publish(js);
+
+      pr2_controllers_msgs::JointTrajectoryControllerState jtcs; // for now, only need to fill in desired/actual pos/vel
+      jtcs.actual.positions = desiredPos; // todo
+      jtcs.actual.velocities = desiredVel; // todo
+      jtcs.desired.positions = desiredPos;
+      jtcs.desired.velocities = desiredVel;
+      statePublishers[it.first].publish(jtcs);
+      
+      std_msgs::String opmode;
+      opmode1.data = "velocity";
+      currentOperationModePublishers[it.first].publish(opmode);
     }
 
     ros::spinOnce();
