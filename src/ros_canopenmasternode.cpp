@@ -1,5 +1,6 @@
 #include "ros/ros.h"
 #include "std_msgs/String.h"
+#include "sensor_msgs/JointState.h"
 #include "cob_srvs/Trigger.h"
 #include "ros_canopen/posmsg.h"
 #include <iostream>
