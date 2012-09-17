@@ -13,15 +13,20 @@
 #include <canopenmaster.h>
 #include <XmlRpcValue.h>
 
-typedef boost::function<bool(cob_srvs::Trigger::Request&, cob_srvs::Trigger::Response&)> TriggerCallbackType;
-typedef boost::function<bool(cob_srvs::SetOperationMode::Request&, cob_srvs::SetOperationMode::Response&)> SetOperationModeCallbackType;
-
-typedef boost::function<void(const ros_canopen::posmsg&)> setPosCallbackType;
-typedef boost::function<void(const brics_actuator::JointVelocities&)> JointVelocitiesCallbackType;
+typedef boost::function<
+  bool(cob_srvs::Trigger::Request&,
+       cob_srvs::Trigger::Response&)> TriggerCallbackType;
+typedef boost::function<
+  bool(cob_srvs::SetOperationMode::Request&,
+       cob_srvs::SetOperationMode::Response&)> SetOperationModeCallbackType;
+typedef boost::function<
+  void(const ros_canopen::posmsg&)> setPosCallbackType;
+typedef boost::function<
+  void(const brics_actuator::JointVelocities&)> JointVelocitiesCallbackType;
 
 bool initChainCallback(cob_srvs::Trigger::Request &req,
 		       cob_srvs::Trigger::Response &res, std::string chainName) {
-  canopen::initCallback(chainName);
+  canopen::initCallback(chainName, canopen::sync_deltaT_msec);
   res.success.data = true;
   res.error_message.data = "";
   return true;
@@ -95,6 +100,11 @@ int main(int argc, char **argv)
   ros::NodeHandle n;
   canopen::using_master_thread = true;
 
+  int sync_deltaT_msec_int = 20; // todo!
+  canopen::sync_deltaT_msec = std::chrono::milliseconds(sync_deltaT_msec_int);
+  std::cout << "sync rate: " << sync_deltaT_msec_int << std::endl;
+
+
   XmlRpc::XmlRpcValue xmlrpc_array;
   bool success = n.getParam("/chaindesc", xmlrpc_array); // todo: not needed?
   auto chainDesc = parseChainDescription(xmlrpc_array);
@@ -165,7 +175,11 @@ int main(int argc, char **argv)
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
   ros_canopen::posmsg msg;
-  ros::Rate loop_rate(50);
+  //int sync_deltaT_msec_int = static_cast<int>(canopen::sync_deltaT_msec.count());
+  //std::cout << "ROS loop rate: " << sync_deltaT_msec_int << std::endl;
+  double lr = 1000.0 / static_cast<double>(sync_deltaT_msec_int);
+  std::cout << "Loop rate: " << lr << std::endl;
+  ros::Rate loop_rate(lr);  // todo! now correct (?)
   // publish on the advertised topics:
   while (ros::ok()) {
     
@@ -184,7 +198,7 @@ int main(int argc, char **argv)
       // todo: this one not needed for controller (?); publishing only dummy info for now
       // pro chain, weil verscxhiedene frequenzen pro chain
       sensor_msgs::JointState js;  
-      std::vector<std::string> ss = {"arm_1_joint","arm_2_joint","arm_3_joint","arm_4_joint","arm_5_joint","arm_6_joint"}; // todo!
+      std::vector<std::string> ss = {"arm_1_joint"}; // ,"arm_2_joint","arm_3_joint","arm_4_joint","arm_5_joint","arm_6_joint"}; // todo!
       js.name = ss;
       js.header.stamp = ros::Time::now(); // todo: should be timestamp of hardware msg
       js.position = actualPos;
