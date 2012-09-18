@@ -71,7 +71,7 @@ void jointVelocitiesCallback(const brics_actuator::JointVelocities &msg, std::st
     std::cout << v << "  ";
   std::cout << std::endl;
 
-  canopen::setVelCallback(chainName, velocities);
+  canopen::setVelCallback(chainName, velocities);  
 }
 
 
