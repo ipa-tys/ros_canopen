@@ -198,7 +198,8 @@ int main(int argc, char **argv)
       // todo: this one not needed for controller (?); publishing only dummy info for now
       // pro chain, weil verscxhiedene frequenzen pro chain
       sensor_msgs::JointState js;  
-      std::vector<std::string> ss = {"arm_1_joint"}; // ,"arm_2_joint","arm_3_joint","arm_4_joint","arm_5_joint","arm_6_joint"}; // todo!
+      // std::vector<std::string> ss = {"arm_1_joint"}; // ,"arm_2_joint","arm_3_joint","arm_4_joint","arm_5_joint","arm_6_joint"}; // todo!
+      std::vector<std::string> ss = {"arm_1_joint","arm_2_joint","arm_3_joint","arm_4_joint","arm_5_joint","arm_6_joint"}; // todo!
       js.name = ss;
       js.header.stamp = ros::Time::now(); // todo: should be timestamp of hardware msg
       js.position = actualPos;
@@ -206,7 +207,7 @@ int main(int argc, char **argv)
       js.effort = {0,0,0,0,0,0};
       jointStatesPublisher.publish(js);
 
-      pr2_controllers_msgs::JointTrajectoryControllerState jtcs;
+      pr2_controllers_msgs::JointTrajectoryControllerState jtcs; // todo: not sure this is correct
       jtcs.header.stamp = js.header.stamp;
       jtcs.actual.positions = actualPos;
       jtcs.actual.velocities = actualVel;

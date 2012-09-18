@@ -1,20 +1,20 @@
-- name: arm1
+- name: arm_controller
   devices:
-    - name: joint1
+    - name: arm_1_joint
       id: 3
       bus: /dev/pcan32
-    - name: joint2
+    - name: arm_2_joint
       id: 4
       bus: /dev/pcan32
-    - name: joint3
+    - name: arm_3_joint
       id: 5
       bus: /dev/pcan32
-    - name: joint4
+    - name: arm_4_joint
       id: 6
       bus: /dev/pcan32
-    - name: joint5
+    - name: arm_5_joint
       id: 7
       bus: /dev/pcan32
-    - name: joint6
+    - name: arm_6_joint
       id: 8
       bus: /dev/pcan32
