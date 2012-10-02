@@ -15,69 +15,28 @@
 
 typedef boost::function<
   bool(cob_srvs::Trigger::Request&,
-       cob_srvs::Trigger::Response&)> TriggerCallbackType;
+       cob_srvs::Trigger::Response&)> TriggerType;
 typedef boost::function<
-  bool(cob_srvs::SetOperationMode::Request&,
-       cob_srvs::SetOperationMode::Response&)> SetOperationModeCallbackType;
-typedef boost::function<
-  void(const ros_canopen::posmsg&)> setPosCallbackType;
-typedef boost::function<
-  void(const brics_actuator::JointVelocities&)> JointVelocitiesCallbackType;
+  void(const brics_actuator::JointVelocities&)> JointVelocitiesType;
 
-bool initChainCallback(cob_srvs::Trigger::Request &req,
-		       cob_srvs::Trigger::Response &res, std::string chainName) {
-  canopen::initCallback(chainName, canopen::sync_deltaT_msec);
+bool CANopenInit(cob_srvs::Trigger::Request &req,
+		 cob_srvs::Trigger::Response &res, std::string chainName) {
+  canopen::chainMap[chainName]->CANopenInit();
   res.success.data = true;
   res.error_message.data = "";
   return true;
 }
 
-bool homingChainCallback(cob_srvs::Trigger::Request &req,
-			  cob_srvs::Trigger::Response &res, std::string chainName) {
-  canopen::homingCallback(chainName);
-  res.success.data = true;
-  res.error_message.data = "";
-  return true;
-}
-
-bool setOperationModeCallback(cob_srvs::SetOperationMode::Request &req,
-			      cob_srvs::SetOperationMode::Response &res, std::string chainName) {
-  res.success.data = true;  // for now this service is just a dummy, not used elsewhere
-  // res.error_message.data = "";
-  return true;
-}
-
-
-bool IPmodeChainCallback(cob_srvs::Trigger::Request &req,
-			  cob_srvs::Trigger::Response &res, std::string chainName) {
-  canopen::IPmodeCallback(chainName);
-  res.success.data = true;
-  res.error_message.data = "";
-  return true;
-}
-
-/* void setPosChainCallback(const ros_canopen::posmsg &msg, std::string chainName) {
-  std::vector<double> positions = msg.positions;
-  canopen::setPosCallback(chainName, positions);
-  }*/
-
-void jointVelocitiesCallback(const brics_actuator::JointVelocities &msg, std::string chainName) {
+void setVel(const brics_actuator::JointVelocities &msg, std::string chainName) {
   std::vector<double> velocities;
   for (auto it : msg.velocities)
     velocities.push_back(it.value);
- 
-  std::cout << "Velocities: ";
-  for (auto v : velocities)
-    std::cout << v << "  ";
-  std::cout << std::endl;
-
-  canopen::setVelCallback(chainName, velocities);  
+  canopen::chainMap[chainName]->setVel(velocities); // { velocities[0] } hack
 }
-
 
 std::vector<canopen::ChainDescription> parseChainDescription(XmlRpc::XmlRpcValue xx) {
   std::vector<canopen::ChainDescription> chainDesc;
-
+  
   for (int i=0; i<xx.size(); i++) {
     canopen::ChainDescription chain;
     chain.name = static_cast<std::string>(xx[i]["name"]);
@@ -98,87 +57,65 @@ int main(int argc, char **argv)
 {
   ros::init(argc, argv, "ros_canopenmasternode");
   ros::NodeHandle n;
+
   canopen::using_master_thread = true;
-
-  int sync_deltaT_msec_int = 20; // todo!
-  canopen::sync_deltaT_msec = std::chrono::milliseconds(sync_deltaT_msec_int);
-  std::cout << "sync rate: " << sync_deltaT_msec_int << std::endl;
-
+  canopen::syncInterval = std::chrono::milliseconds(20); // todo: parse from config file
 
   XmlRpc::XmlRpcValue xmlrpc_array;
-  bool success = n.getParam("/chaindesc", xmlrpc_array); // todo: not needed?
+  if (! n.getParam("/chaindesc", xmlrpc_array)) {
+    std::cout << "No chain description on parameter server; aborting" << std::endl;
+    return -1;
+  }
   auto chainDesc = parseChainDescription(xmlrpc_array);
   canopen::initChainMap(chainDesc);
 
-  // read in chain description file given as command line argument, e.g.
-  // /home/tys/git/other/canopen/demo/single_device.csv
-  // /home/tys/git/other/canopen/demo/multiple_devices.csv
-  /*  if (argc!=2 || !exists(  boost::filesystem::path(argv[1]) )) {
-    std::cout << "File not found. Please provide a description file as command line argument" << std::endl;
-    return -1;
-    }*/
-  // canopen::initChainMap(argv[1]);  todo!
+  std::cout << "hi" << std::endl;
 
-  // set up services, subsribers, and publishers for each of the chains:
-  std::vector<TriggerCallbackType> initCallbacks;
+  // set up services, subscribers, and publishers for each of the chains:
+  std::vector<TriggerType> initCallbacks;
   std::vector<ros::ServiceServer> initServices;
-  std::vector<TriggerCallbackType> homingCallbacks;
-  std::vector<ros::ServiceServer> homingServices;
-  std::vector<TriggerCallbackType> IPmodeCallbacks;
-  std::vector<ros::ServiceServer> IPmodeServices;
-  std::vector<SetOperationModeCallbackType> setOperationModeCallbacks;
-  std::vector<ros::ServiceServer> setOperationModeServices;
-
-  // std::vector<setPosCallbackType> setPosCallbacks;
-  // std::vector<ros::Subscriber> setPosSubscribers;
-
-  std::vector<JointVelocitiesCallbackType> jointVelocitiesCallbacks;
+  std::vector<JointVelocitiesType> jointVelocitiesCallbacks;
   std::vector<ros::Subscriber> jointVelocitiesSubscribers;
-
   std::map<std::string, ros::Publisher> currentOperationModePublishers;
-  // std::map<std::string, ros::Publisher> getCurrentPosPublishers;
   std::map<std::string, ros::Publisher> statePublishers;
-  ros::Publisher jointStatesPublisher = n.advertise<sensor_msgs::JointState>("/joint_states", 100);
+  ros::Publisher jointStatesPublisher = 
+    n.advertise<sensor_msgs::JointState>("/joint_states", 100);
+  
   for (auto it : canopen::chainMap) {
-    initCallbacks.push_back( boost::bind(initChainCallback, _1, _2, it.first) );
-    initServices.push_back( n.advertiseService(it.first + "/init", initCallbacks.back()) );
-    homingCallbacks.push_back( boost::bind(homingChainCallback, _1, _2, it.first) );
-    homingServices.push_back( n.advertiseService(it.first + "/homing", homingCallbacks.back()) );
-    IPmodeCallbacks.push_back( boost::bind(IPmodeChainCallback, _1, _2, it.first) );
-    IPmodeServices.push_back( n.advertiseService(it.first + "/IPmode", IPmodeCallbacks.back()) );
-    setOperationModeCallbacks.push_back( boost::bind(setOperationModeCallback, _1, _2, it.first) );
-    setOperationModeServices.push_back( n.advertiseService(it.first + "/set_operation_mode", setOperationModeCallbacks.back()) );
+    initCallbacks.push_back( boost::bind(CANopenInit, _1, _2, it.first) );
+    initServices.push_back
+      (n.advertiseService(it.first + "/init", initCallbacks.back()) );
+    jointVelocitiesCallbacks.push_back( boost::bind(setVel, _1, it.first) );
+    jointVelocitiesSubscribers.push_back
+      (n.subscribe<brics_actuator::JointVelocities>
+       (it.first + "/command_vel", 100, jointVelocitiesCallbacks.back())  );
 
-
-    // setPosCallbacks.push_back( boost::bind(setPosChainCallback, _1, it.first) );
-    // setPosSubscribers.push_back( n.subscribe<ros_canopen::posmsg>(it.first + "/setpos", 100, setPosCallbacks.back()) );
-
-    jointVelocitiesCallbacks.push_back( boost::bind(jointVelocitiesCallback, _1, it.first) );
-    jointVelocitiesSubscribers.push_back( n.subscribe<brics_actuator::JointVelocities>(it.first + "/command_vel", 100, jointVelocitiesCallbacks.back()) );
-
-    currentOperationModePublishers[it.first] = n.advertise<std_msgs::String>(it.first + "/current_operationmode", 1000);
-    // getCurrentPosPublishers[it.first] = n.advertise<ros_canopen::posmsg>(it.first + "/getcurrentpos", 1000);
-    statePublishers[it.first] = n.advertise<pr2_controllers_msgs::JointTrajectoryControllerState>(it.first + "/state", 1000);
-
+    currentOperationModePublishers[it.first] =
+      n.advertise<std_msgs::String>
+      (it.first + "/current_operationmode", 1000);
+    
+    statePublishers[it.first] =
+      n.advertise<pr2_controllers_msgs::JointTrajectoryControllerState>
+      (it.first + "/state", 1000);
   }
 
-  // initialize CAN device driver:
   if (!canopen::openConnection("/dev/pcan32")) {
     std::cout << "Cannot open CAN device; aborting." << std::endl;
     return -1;
   } 
-  canopen::initNMT();
-
   canopen::initListenerThread();
   canopen::initIncomingPDOProcessorThread();
   canopen::initMasterThread();
-  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  canopen::initNMT();
 
-  ros_canopen::posmsg msg;
-  //int sync_deltaT_msec_int = static_cast<int>(canopen::sync_deltaT_msec.count());
-  //std::cout << "ROS loop rate: " << sync_deltaT_msec_int << std::endl;
-  double lr = 1000.0 / static_cast<double>(sync_deltaT_msec_int);
+  double lr = 1000.0 / std::chrono::duration_cast
+    <std::chrono::milliseconds>(canopen::syncInterval).count();
   std::cout << "Loop rate: " << lr << std::endl;
+
+  while (true) {}
+  return 0;
+}
+  /*
   ros::Rate loop_rate(lr);  // todo! now correct (?)
   // publish on the advertised topics:
   while (ros::ok()) {
@@ -198,8 +135,8 @@ int main(int argc, char **argv)
       // todo: this one not needed for controller (?); publishing only dummy info for now
       // pro chain, weil verscxhiedene frequenzen pro chain
       sensor_msgs::JointState js;  
-      // std::vector<std::string> ss = {"arm_1_joint"}; // ,"arm_2_joint","arm_3_joint","arm_4_joint","arm_5_joint","arm_6_joint"}; // todo!
-      std::vector<std::string> ss = {"arm_1_joint","arm_2_joint","arm_3_joint","arm_4_joint","arm_5_joint","arm_6_joint"}; // todo!
+      std::vector<std::string> ss = {"arm_1_joint"}; // ,"arm_2_joint","arm_3_joint","arm_4_joint","arm_5_joint","arm_6_joint"}; // todo!
+      //      std::vector<std::string> ss = {"arm_1_joint","arm_2_joint","arm_3_joint","arm_4_joint","arm_5_joint","arm_6_joint"}; // todo!
       js.name = ss;
       js.header.stamp = ros::Time::now(); // todo: should be timestamp of hardware msg
       js.position = actualPos;
@@ -226,3 +163,4 @@ int main(int argc, char **argv)
 
   return 0;
 }
+*/
