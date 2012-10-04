@@ -18,12 +18,22 @@ typedef boost::function<
        cob_srvs::Trigger::Response&)> TriggerType;
 typedef boost::function<
   void(const brics_actuator::JointVelocities&)> JointVelocitiesType;
+typedef boost::function<
+  bool(cob_srvs::SetOperationMode::Request&,
+       cob_srvs::SetOperationMode::Response&)> SetOperationModeCallbackType;
 
 bool CANopenInit(cob_srvs::Trigger::Request &req,
 		 cob_srvs::Trigger::Response &res, std::string chainName) {
   canopen::chainMap[chainName]->CANopenInit();
   res.success.data = true;
   res.error_message.data = "";
+  return true;
+}
+
+bool setOperationModeCallback(cob_srvs::SetOperationMode::Request &req,
+			      cob_srvs::SetOperationMode::Response &res, std::string chainName) {
+  res.success.data = true;  // for now this service is just a dummy, not used elsewhere
+  // res.error_message.data = "";
   return true;
 }
 
@@ -56,13 +66,13 @@ std::vector<canopen::ChainDescription> parseChainDescription(XmlRpc::XmlRpcValue
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "ros_canopenmasternode");
-  ros::NodeHandle n;
+  ros::NodeHandle n("~");
 
   canopen::using_master_thread = true;
   canopen::syncInterval = std::chrono::milliseconds(20); // todo: parse from config file
 
   XmlRpc::XmlRpcValue xmlrpc_array;
-  if (! n.getParam("/chaindesc", xmlrpc_array)) {
+  if (! n.getParam("chains", xmlrpc_array)) {
     std::cout << "No chain description on parameter server; aborting" << std::endl;
     return -1;
   }
@@ -74,6 +84,9 @@ int main(int argc, char **argv)
   // set up services, subscribers, and publishers for each of the chains:
   std::vector<TriggerType> initCallbacks;
   std::vector<ros::ServiceServer> initServices;
+  std::vector<SetOperationModeCallbackType> setOperationModeCallbacks;
+  std::vector<ros::ServiceServer> setOperationModeServices;
+
   std::vector<JointVelocitiesType> jointVelocitiesCallbacks;
   std::vector<ros::Subscriber> jointVelocitiesSubscribers;
   std::map<std::string, ros::Publisher> currentOperationModePublishers;
@@ -84,19 +97,23 @@ int main(int argc, char **argv)
   for (auto it : canopen::chainMap) {
     initCallbacks.push_back( boost::bind(CANopenInit, _1, _2, it.first) );
     initServices.push_back
-      (n.advertiseService(it.first + "/init", initCallbacks.back()) );
+      (n.advertiseService("/" + it.first + "/init", initCallbacks.back()) );
+    setOperationModeCallbacks.push_back( boost::bind(setOperationModeCallback, _1, _2, it.first) );
+    setOperationModeServices.push_back( n.advertiseService("/" + it.first + "/set_operation_mode", setOperationModeCallbacks.back()) );
+
     jointVelocitiesCallbacks.push_back( boost::bind(setVel, _1, it.first) );
     jointVelocitiesSubscribers.push_back
       (n.subscribe<brics_actuator::JointVelocities>
-       (it.first + "/command_vel", 100, jointVelocitiesCallbacks.back())  );
+       ("/" + it.first + "/command_vel", 100, jointVelocitiesCallbacks.back())  );
+    // todo: remove global namespace ticket
 
     currentOperationModePublishers[it.first] =
       n.advertise<std_msgs::String>
-      (it.first + "/current_operationmode", 1000);
+      ("/" + it.first + "/current_operationmode", 1000);
     
     statePublishers[it.first] =
       n.advertise<pr2_controllers_msgs::JointTrajectoryControllerState>
-      (it.first + "/state", 1000);
+      ("/" + it.first + "/state", 1000);
   }
 
   if (!canopen::openConnection("/dev/pcan32")) {
@@ -107,49 +124,36 @@ int main(int argc, char **argv)
   canopen::initIncomingPDOProcessorThread();
   canopen::initMasterThread();
   canopen::initNMT();
+  for (auto it : canopen::chainMap) 
+    it.second->CANopenInit();
 
   double lr = 1000.0 / std::chrono::duration_cast
     <std::chrono::milliseconds>(canopen::syncInterval).count();
   std::cout << "Loop rate: " << lr << std::endl;
+  ros::Rate loop_rate(lr); 
 
-  while (true) {}
-  return 0;
-}
-  /*
-  ros::Rate loop_rate(lr);  // todo! now correct (?)
-  // publish on the advertised topics:
+  canopen::ChainState cs;
+
   while (ros::ok()) {
     
     for (auto it : canopen::chainMap) { // iterate over all chains, get current pos and vel and publish as topics:
-      std::vector<double> actualPos = canopen::getActualPosCallback(it.first);
-      std::vector<double> actualVel = canopen::getActualVelCallback(it.first);
-      std::vector<double> desiredPos = canopen::getDesiredPosCallback(it.first);
-      std::vector<double> desiredVel = canopen::getDesiredVelCallback(it.first);
-      
-      // msg.positions = actualPos;
-      // it.second.publish(msg);
-      
-      // todo: before info from hardware received, do not publish joitn states and operation mode!!
-      // donÄt publish anythign before
+      cs = it.second->getChainState();
 
-      // todo: this one not needed for controller (?); publishing only dummy info for now
-      // pro chain, weil verscxhiedene frequenzen pro chain
       sensor_msgs::JointState js;  
-      std::vector<std::string> ss = {"arm_1_joint"}; // ,"arm_2_joint","arm_3_joint","arm_4_joint","arm_5_joint","arm_6_joint"}; // todo!
-      //      std::vector<std::string> ss = {"arm_1_joint","arm_2_joint","arm_3_joint","arm_4_joint","arm_5_joint","arm_6_joint"}; // todo!
+      std::vector<std::string> ss = {"tray_1_joint", "tray_2_joint", "tray_3_joint"};
       js.name = ss;
       js.header.stamp = ros::Time::now(); // todo: should be timestamp of hardware msg
-      js.position = actualPos;
-      js.velocity = actualVel;
-      js.effort = {0,0,0,0,0,0};
+      js.position = cs.actualPos;
+      js.velocity = cs.actualVel;
+      js.effort = {0,0,0};
       jointStatesPublisher.publish(js);
 
-      pr2_controllers_msgs::JointTrajectoryControllerState jtcs; // todo: not sure this is correct
+      pr2_controllers_msgs::JointTrajectoryControllerState jtcs; // todo: check if this is correct
       jtcs.header.stamp = js.header.stamp;
-      jtcs.actual.positions = actualPos;
-      jtcs.actual.velocities = actualVel;
-      jtcs.desired.positions = desiredPos;
-      jtcs.desired.velocities = desiredVel;
+      jtcs.actual.positions = cs.actualPos;
+      jtcs.actual.velocities = cs.actualVel;
+      jtcs.desired.positions = cs.desiredPos;
+      jtcs.desired.velocities = cs.desiredVel;
       statePublishers[it.first].publish(jtcs);
       
       std_msgs::String opmode;
@@ -163,4 +167,4 @@ int main(int argc, char **argv)
 
   return 0;
 }
-*/
+
