@@ -30,6 +30,16 @@ bool CANopenInit(cob_srvs::Trigger::Request &req,
   return true;
 }
 
+bool recover(cob_srvs::Trigger::Request &req,
+	     cob_srvs::Trigger::Response &res, std::string chainName) {
+  canopen::chainMap[chainName]->recover();
+  canopen::chainMap[chainName]->CANopenInit();
+  canopen::chainMap[chainName]->setVel({0.04,0.04,0.04});
+  res.success.data = true;
+  res.error_message.data = "";
+  return true;
+}
+
 bool setOperationModeCallback(cob_srvs::SetOperationMode::Request &req,
 			      cob_srvs::SetOperationMode::Response &res, std::string chainName) {
   res.success.data = true;  // for now this service is just a dummy, not used elsewhere
@@ -84,6 +94,8 @@ int main(int argc, char **argv)
   // set up services, subscribers, and publishers for each of the chains:
   std::vector<TriggerType> initCallbacks;
   std::vector<ros::ServiceServer> initServices;
+  std::vector<TriggerType> recoverCallbacks;
+  std::vector<ros::ServiceServer> recoverServices;
   std::vector<SetOperationModeCallbackType> setOperationModeCallbacks;
   std::vector<ros::ServiceServer> setOperationModeServices;
 
@@ -98,6 +110,11 @@ int main(int argc, char **argv)
     initCallbacks.push_back( boost::bind(CANopenInit, _1, _2, it.first) );
     initServices.push_back
       (n.advertiseService("/" + it.first + "/init", initCallbacks.back()) );
+
+    recoverCallbacks.push_back( boost::bind(recover, _1, _2, it.first) );
+    initServices.push_back
+      (n.advertiseService("/" + it.first + "/recover", recoverCallbacks.back()) );
+
     setOperationModeCallbacks.push_back( boost::bind(setOperationModeCallback, _1, _2, it.first) );
     setOperationModeServices.push_back( n.advertiseService("/" + it.first + "/set_operation_mode", setOperationModeCallbacks.back()) );
 
