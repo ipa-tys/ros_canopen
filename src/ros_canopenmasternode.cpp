@@ -40,8 +40,8 @@ bool setOperationModeCallback(cob_srvs::SetOperationMode::Request &req,
 void setVel(const brics_actuator::JointVelocities &msg, std::string chainName) {
   std::vector<double> velocities;
   for (auto it : msg.velocities)
-    velocities.push_back(it.value);
-  canopen::chainMap[chainName]->setVel(velocities); // { velocities[0] } hack
+    velocities.push_back( it.value); 
+  canopen::chainMap[chainName]->setVel(velocities); 
 }
 
 std::vector<canopen::ChainDescription> parseChainDescription(XmlRpc::XmlRpcValue xx) {
@@ -69,10 +69,11 @@ int main(int argc, char **argv)
   ros::NodeHandle n("~");
 
   canopen::using_master_thread = true;
-  canopen::syncInterval = std::chrono::milliseconds(20); // todo: parse from config file
+  canopen::syncInterval = std::chrono::milliseconds(10); // todo: parse from config file
 
   XmlRpc::XmlRpcValue xmlrpc_array;
-  if (! n.getParam("chains", xmlrpc_array)) {
+  if (! n.getParam("/chaindesc", xmlrpc_array)) {
+  // if (! n.getParam("chains", xmlrpc_array)) {
     std::cout << "No chain description on parameter server; aborting" << std::endl;
     return -1;
   }
@@ -105,7 +106,7 @@ int main(int argc, char **argv)
     jointVelocitiesSubscribers.push_back
       (n.subscribe<brics_actuator::JointVelocities>
        ("/" + it.first + "/command_vel", 100, jointVelocitiesCallbacks.back())  );
-    // todo: remove global namespace ticket
+    // todo: remove global namespace; ticket
 
     currentOperationModePublishers[it.first] =
       n.advertise<std_msgs::String>
@@ -140,12 +141,20 @@ int main(int argc, char **argv)
       cs = it.second->getChainState();
 
       sensor_msgs::JointState js;  
-      std::vector<std::string> ss = {"tray_1_joint", "tray_2_joint", "tray_3_joint"};
+      // std::vector<std::string> ss = {"tray_1_joint", "tray_2_joint", "tray_3_joint"};
+      std::vector<std::string> ss = {"arm_1_joint", "arm_2_joint", "arm_3_joint","arm_4_joint", "arm_5_joint", "arm_6_joint"};
       js.name = ss;
       js.header.stamp = ros::Time::now(); // todo: should be timestamp of hardware msg
+      // hack:
+      //for (int i=0; i<cs.actualPos.size(); i++) {
+      //	cs.actualPos[i] = - cs.actualPos[i];
+      //	cs.actualVel[i] = - cs.actualVel[i];
+      //	cs.desiredPos[i] = - cs.desiredPos[i];
+      //	cs.desiredVel[i] = - cs.desiredVel[i];
+      //      } // end of hack
       js.position = cs.actualPos;
       js.velocity = cs.actualVel;
-      js.effort = {0,0,0};
+      js.effort = {0,0,0,0,0,0};
       jointStatesPublisher.publish(js);
 
       pr2_controllers_msgs::JointTrajectoryControllerState jtcs; // todo: check if this is correct
