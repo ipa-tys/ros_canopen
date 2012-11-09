@@ -11,6 +11,7 @@
 #include <boost/bind.hpp>
 #include <boost/filesystem.hpp>
 #include <canopenmaster.h>
+#include <listener.h>
 #include <XmlRpcValue.h>
 
 typedef boost::function<
@@ -121,8 +122,8 @@ int main(int argc, char **argv)
     std::cout << "Cannot open CAN device; aborting." << std::endl;
     return -1;
   } 
-  canopen::initListenerThread();
-  canopen::initIncomingPDOProcessorThread();
+  canopen::initListenerThread(canopen::smartListener);
+  // canopen::initIncomingPDOProcessorThread();
   canopen::initMasterThread();
   canopen::initNMT();
   for (auto it : canopen::chainMap) 
